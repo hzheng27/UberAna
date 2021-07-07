@@ -1,0 +1,298 @@
+---
+title: "Process Notebook"
+output: html_document
+---
+
+# Abstract
+In this project, we want to find out the relationship between time and location base with pickups, in case we can draw conclusions or even provide corresponding suggestions for future operating strategies.  
+
+We first set up three initial questions to explore: 
+
+(1) What is the relationship between time and rides? 
+
+(2) What is the peak period of passenger car use? 
+
+(3) What is the most popular spot of rides?
+
+After data obtaining and pre-processing, we carry out descriptive analysis using line-plot, pie-chart, bar-plot and heat map to visualize the relationship as well as time series analysis to quantitatively measure the relationship.
+
+We came to conclude that 
+
+(1) the number of pickups follows a ARIMA(1,7,0) time series model; 
+
+(2) the peak month of passenger car use is September; the peak period for weekdays is rush hours, that is the time people logging from home to work or from work to home, which happens at 7am to 9am and 4pm to 10pm; the peak period for weekends occurs during Saturday night; 
+
+(3) the most popular spot of rides is B02617, while B02512 and B02764 are the most unpopular bases.
+
+
+# Overview and Motivation
+The emergence of Internet ride-hailing platforms has not only reconstructed the offline ride-hailing market, but also provided more profitable possibilities for other idle resources in the market. Since birth, Uber has firmly occupied the first position in the Non-China travel market. While developing rapidly, it has  to gradually provide diversified services to users, as well as continuously optimize the allocation of resources for social automobile travel. 
+
+Therefore, this project analyze the pickup order data of a certain city of Uber, and draw conclusions and provide corresponding suggestions for future operating strategies.
+
+
+# Related Work
+The method that first comes to our mind is time series analysis, which includes general statistical analysis (for example autocorrelation analysis), the establishment and inference of statistical models, the optimal prediction of time series, is one of the quantitative forecasting methods. Due to its’ simplicity and ease of mastery, this statistical analysis method is widely used, especially in forecasting daily data.
+
+Specifically, while operating, we first draw a correlation diagram based on the dynamic data, perform correlation analysis, and find out the autocorrelation function. The correlation graph tells the trend and cycle of change, as well as finding jump points and inflection points. Jump points are observations which are inconsistent with other data. If the jump point is the correct observation value, it should be considered when modeling, if it is abnormal, then the jump point should be adjusted to the expected value. The inflection point is the point where the time series undergo a suddenly change. If there is an inflection point, different models must be used to fit the time series segmentally during modeling, such as a threshold regression model.
+
+Then, we go through the identifying of the appropriate random model and perform curve fitting, that is, using a general random model to fit the observation data of the time series. At last, we use the model we generated for analysis or forecasting. 
+
+
+# Initial Questions
+In this project, we are trying to find out the relationship between time and rides, the peak period of passenger car use, as well as the most popular spot of rides. 
+Thus, our initial questions are
+
+(1) What is the relationship between time and rides? 
+
+(2) What is the peak period of passenger car use?
+
+(3) What is the most popular spot of rides?
+
+Moreover, base on this, we hope to draw conclusions and provide corresponding suggestions for future operating strategies. 
+
+
+# Data
+In this part, we tell where we get our data and how do we process it.
+We use the Uber pickups data in New York City obtained from Kaggle (https://www.kaggle.com/fivethirtyeight/uber-pickups-in-new-york-city).
+
+First, we read them in, and bind them together since they are in separated files recorded by month.
+```{r}
+# Read Data
+apr <- read.csv('/Users/Data/uber-raw-data-apr14.csv')
+may <- read.csv('/Users/Data/uber-raw-data-may14.csv')
+jun <- read.csv('/Users/Data/uber-raw-data-jun14.csv')
+jul <- read.csv('/Users/Data/uber-raw-data-jul14.csv')
+aug <- read.csv('/Users/Data/uber-raw-data-aug14.csv')
+sep <- read.csv('/Users/Data/uber-raw-data-sep14.csv')
+
+data <- rbind(apr, may, jun, jul, aug, sep)
+data <- na.omit(data)
+dim(data)
+```
+
+As we can see, after removing missing values, the data-set contains over 4.5 million Uber pickups from April to September of Year 2014 and gives information on the timing and location (that is date and time, the latitude and longitude) of each Uber pickup, as well as The TLC base company code affiliated with each Uber pickup.
+
+After that, we carry out some cleaning process on the data, which includes converting date-time format.
+
+```{r, include = FALSE, results = 'hide'}
+library(lubridate)
+library(dplyr)
+library(ggplot2)
+Sys.setlocale("LC_TIME", "en_US.ISO8859-1")
+```
+
+```{r}
+data$Date.Time <- strptime(x = as.character(data$Date.Time), format = "%m/%d/%Y %H:%M:%S")
+data$Date <- as.Date(data$Date.Time)
+
+# Add Month column
+data$Month <- month(data$Date)
+
+# Add Week column
+data$Weekday <- as.factor(weekdays(data$Date, abbr = F))
+
+# Add hour column
+data$Hour <- as.factor(format(data$Date.Time, format = "%H"))
+
+# Add weekend column
+weekend <- c("Saturday","Sunday")
+data$is_work <- ifelse(data$Week %in% weekend, 0, 1)
+
+# Add Number of week column
+data$Week <- as.factor(interval(min(data$Date), data$Date) %/% weeks(1) + 1)
+
+# See what columns we have now
+head(data)
+```
+
+
+# Exploratory Data Analysis
+Now, we carry out some descriptive analysis focusing on the relationship between time and pickups. Different visualization methods we used are line-plot, pie-chart, bar-plot and heat map.
+
+The pickup trends by day is drawn as the line below.
+```{r}
+by_day <- data %>% group_by(Date) %>% dplyr::summarize(Total = n()) 
+by_day <- as.data.frame(by_day)
+plot(by_day, type ='l', col = 'darkblue', main = 'Num of Pickups by Day')
+```
+
+The pickup trends by weekday is drawn as the pie-chart below.
+```{r}
+by_weekday <- data %>% group_by(Weekday) %>% dplyr::summarize(Total = n()) 
+by_weekday <- as.data.frame(by_weekday)
+percentage <- scales::percent(by_weekday$Total/sum(by_weekday$Total)) 
+label_weekday <- paste(ifelse(by_weekday$Weekday == 'Thursday',
+                              'Thur',
+                              substr(by_weekday$Weekday,1,3)), 
+                      '-', percentage, sep = '')
+ggplot(data = by_weekday, aes(x = '', y = Total, fill = Weekday)) + 
+  geom_bar(stat = 'identity', width = 1) + 
+  geom_text(aes(y = c(4100000,3550000,2900000,2380000,1640000,1100000,400000), 
+                  label = label_weekday), size = 3.2) + 
+  theme_bw() + 
+  labs(x = '', y = '',title = 'Pickup Distribution') +
+  theme(plot.title = element_text(hjust = 0.5)) + 
+  coord_polar(theta = 'y', start = 0, direction = 1) 
+```
+
+The pickup trends by hour is drawn as the bar-plot below.
+```{r}
+# Pickup Trends by Hour
+by_hour <- data %>% group_by(Hour) %>% dplyr::summarize(Total = n()) 
+by_hour <- as.data.frame(by_hour)
+ggplot(by_hour , aes(Hour, Total)) + 
+  geom_bar(stat = 'identity', fill = "#6699CC") +
+  ggtitle('Num of Pickups by Hour')
+```
+
+The heat map of pickups by hour and weekday is drawn below.
+```{r}
+by_daily <- as.data.frame(table(data$Weekday, data$Hour))
+colnames(by_daily) <- c('Weekday', 'Hour', 'Freq')
+ggplot(by_daily, aes(x = Hour, y = Weekday)) + 
+  geom_tile(aes(fill = Freq)) + 
+  scale_fill_gradient(name = "Num per Hour", low = "darkgreen", high = "lightgrey") +
+  ggtitle("Pickups by Hour and Weekday") + 
+  ylab("Hourly Pickups") +
+  xlab("Hours")
+```
+
+The heat map of pickups by month and weekday is drawn below.
+```{r}
+# by Month and Weekday
+by_month <- as.data.frame(table(data$Weekday, data$Month))
+colnames(by_month) <- c('Weekday', 'Month', 'Freq')
+ggplot(by_month, aes(x = Month, y = Weekday)) + 
+  geom_tile(aes(fill =  Freq)) + 
+  scale_fill_gradient(name = "Num per Month", low = "darkgreen", high = "lightgrey") +
+  ggtitle("Pickups by Weekday and Month") + 
+  ylab("Pickups by Base") +
+  xlab("Month")
+```
+
+The heat map of pickups by base and weekday is drawn below.
+```{r}
+# by Base and Weekday
+by_base_weekday <- as.data.frame(table(data$Weekday, data$Base))
+colnames(by_base_weekday) <- c('Weekday', 'Base', 'Freq')
+ggplot(by_base_weekday, aes(x = Base, y = Weekday)) + 
+  geom_tile(aes(fill =  Freq)) + 
+  scale_fill_gradient(name = "Num per Base", low = "white", high = "darkorange") +
+  ggtitle("Pickups by Weekday and Base") + 
+  ylab("Pickups by Base") +
+  xlab("Base")
+```
+
+The heat map of pickups by base and month is drawn below.
+```{r}
+# by Base and Month
+by_base_month <- as.data.frame(table(data$Month, data$Base))
+colnames(by_base_month) <- c('Month', 'Base', 'Freq')
+ggplot(by_base_month, aes(x = Base, y = Month)) + 
+  geom_tile(aes(fill =  Freq)) + 
+  scale_fill_gradient(name = "Num per Base", low = "white", high = "darkorange") +
+  ggtitle("Pickups by Month and Base") + 
+  ylab("Basely Pickups Num") +
+  xlab("Base")
+```
+
+These plots clearly illustrate the fact that the number of pickups exert timely, that is hourly and daily, trend. Though the bar-plot tells no or little significant differences between the number of pickups when grouping by weekdays, the line-plot tells that weekly trends exerts. 
+
+# Final Analysis
+After exploratory data analysis, we spot out the timely trend of number of pickups, therefore in this part, we tend to find out the equation of the trend by applying time series analysis.
+
+```{r, include = FALSE, results = 'hide'}
+library(forecast)
+library(tseries)
+library(zoo)
+```
+
+First, we draw a time series diagram of the observation sequence, to intuitively explore whether the sequence has an obvious trend. We convert the number of pickups by weekdays into time series data and draw the graph of autocorrelation function of the original data. As can be seen from the figure below, we can spot out there is obvious weekly trend. 
+```{r}
+num_day <- ts(by_day$Total,start=c(2014,120),frequency = 365)
+plot(num_day, type = 'l', xlab = 'Day', main = 'Daily Order Num')
+```   
+
+We then carry out the ADF unit root test and find out that P-value is 0.1935, significantly larger than 0.05, which accepts the null hypothesis. This states that unit root exists and the time sequence tend not to be stationary. Thus, according to the principle of time series analysis, we have to turn the sequence into a stationary sequence to carry out further analysis.
+```{r}
+adf.test(num_day)
+```  
+
+Now, we calculate the fluctuation of number of pickups by weekdays since weekly trends exerts. Autocorrelation is the cross-correlation of an observation at different points in time. Intuitively speaking, it is a function of the similarity between two observations and the time difference between them. It is a mathematical tool to find repetitive patterns (such as periodic signals masked by noise), or to identify fundamental frequencies that are hidden in the harmonic frequencies of the signal.
+```{r}
+fluctuation <- diff(num_day)
+fluctuation <- diff(num_day,7)
+
+par(mfrow = c(1,2))
+acf(fluctuation)
+pacf(fluctuation)
+
+adf.test(fluctuation)
+
+par(mfrow = c(1,1))
+plot(fluctuation, type = 'l', xlab = 'Day', main = 'Diff of Daily Order Num')
+``` 
+
+As shown in the figure above, the values crossing the blue line as well as being far from zero are decreasing, other values are significantly under the blue line, which means they are within 2 standard deviations, the series tend to be stationary. Results of the ADF unit root test gives a P-value of 0.01, significantly lesser than 0.05, which rejects the null hypothesis. This states that there is no unit root and the time sequence tend to be stationary. Therefore, model fitting and prediction can be carried out. By now, we have finished basic check on the data.
+
+For stationary time series, we often identify the order of the fitted model initially by investigating the properties of the autocorrelation graph and partial autocorrelation graph of the sequence.
+
+As can be seen from the above ACF and PACF figure, the first five order of the series autocorrelation coefficient are outside the range of twice the standard deviation, and the first order of the partial autocorrelation coefficient are outside the range of twice the standard deviation. Therefore, we use the fitting ARIMA(0,0,4) model to fit the differenced sequence.
+
+However, when using the ‘auto.arima’ function in R to automatically detect the possible model, we get ARIMA(1,0,0) as the detected model for fitting. In the subsequent analysis, we will test and compare these two models to find the optimal fitting model.
+
+```{r}
+model_1 <- auto.arima(fluctuation)
+summary(model_1)
+
+model_2 <- arima(fluctuation, order = c(0,0,4), method = "ML")
+summary(model_2)
+BIC(model_2)
+```   
+
+Both AIC and BIC are statistics used to simultaneously measure model fitting and complexity. For a model, of course, the larger the model (the more variables the model has), the more accurate the model. But considering model calculation and overfitting problem, we prefer a simpler model. Thus, we need to find a relatively optimized model to balance the relationship between model size and model fitting accuracy. 
+
+AIC and BIC are two of these metrics. The similarity between them is that they control the size of the model by limiting the number of model variables, while the difference is that the function of penalizing the number of variables is different. In terms of model selection, we tend to choose the model with smaller AIC (BIC).
+
+Therefore, we tend to choose ARIMA(1,0,0) as the model we use, but before final choosing, we need to go through diagnostics testing which assures these model are suitable.
+
+We now draw the residual plot of the model ARIMA(1,0,0) to diagnose whether information has been fully extracted, figure below clearly shows that these two residuals have no significant trend, they appear to be ‘random’.
+```{r}
+plot(model_1$residuals, type = 'l', xlab = 'Day', ylab = 'Residuals'
+     , main = 'Residuals of Model 1')
+``` 
+
+We then draw the ACF and PACF figure of residuals of the model ARIMA(1,0,0) for further observations. Both residual auto-correlations and partial autocorrelation coefficient behaves great, showing no lag at the first six orders. 
+```{r}
+par(mfrow = c(1,2))
+acf(model_1$residuals)
+pacf(model_1$residuals)
+```  
+
+After that, we carry out Ljung-Box test to test the independency of residuals. For Ljung-Box test, the p-value of the model ARIMA(1,0,0) are bigger than 0.05, meaning the residuals pass the test, thus no serial correlation exists among residuals, indicating the information of series has not been fully captured by this model. 
+```{r}
+for(i in 1:6) 
+  print(Box.test(model_1$residuals, lag = i, type = "Ljung-Box"))
+```  
+
+```{r}
+par(mfrow = c(1,1))
+plot(fluctuation)
+lines(model_1$fitted, col = 'red')
+abline(h = 1.96*sd(fluctuation), col = 'orange', lty = 2)
+abline(h = -1.96*sd(fluctuation), col = 'orange', lty = 2)
+```  
+
+The graph of the fitted sequences and the actual sequences are shown as above, and we can tell that the model ARIMA(1,0,0) behaves well. From the above analysis, we can tell that the model ARIMA(1,0,0) passed the independence test, and performs slightly better in AIC and BIC, and the residuals of ARIMA(1,0,0) appears to be completely white noise.
+
+Therefore, we choose ARIMA(1,0,0) as the model for weekly differenced daily pickups number, described in the form as below.
+$$y_t = 0.6024*y_{t-1} + y_{t-7} - 0.6024*y_{t-8} + \varepsilon_t$$
+
+To sum up, we get the answers for out initial questions.
+
+(1) What is the relationship between time and rides? The number of pickups follows a ARIMA(1,7,0)  time series model in the form of $y_t = 0.6024*y_{t-1} + y_{t-7} - 0.6024*y_{t-8} + \varepsilon_t$.
+
+(2) What is the peak period of passenger car use? The peak month of passenger car use is September; the peak period for weekdays is rush hours, that is the time people logging from home to work or from work to home, which happens at 7am to 9am and 4pm to 10pm; the peak period for weekends occurs during Saturday night.
+
+(3) What is the most popular spot of rides? The most popular spot of rides is B02617, while B02512 and B02764 are the most unpopular bases.
